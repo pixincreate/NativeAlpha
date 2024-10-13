@@ -104,6 +104,9 @@ android {
 
 }
 repositories {
+    maven {
+        url 'https://repo.huaweicloud.com/repository/maven/'
+    }
     mavenCentral()
     jcenter()
 }
@@ -111,7 +114,7 @@ repositories {
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
 
-    implementation 'com.mikhaellopez:circularprogressbar:3.0.3'
+    implementation 'com.mikhaellopez:circularprogressbar:3.1.0'
     implementation 'org.jsoup:jsoup:1.14.1'
     implementation 'org.adblockplus:adblock-android-webview:4.4.0'
     implementation 'com.github.ihimanshurawat:Hasher:1.2'
