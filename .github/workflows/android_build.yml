@@ -1,0 +1,92 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Keystore File
+        run: |
+          echo "${{ secrets.KEYSTORE_FILE }}" > keystore.jks.asc
+          gpg -d --passphrase "${{ secrets.KEYSTORE_PASSWORD_GPG }}" --batch keystore.jks.asc > keystore.jks
+
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/wrapper-validation-action@v1
+
+      - name: Build with Gradle
+        run: ./gradlew assembleExtendedRelease
+
+      - name: Find the APK file
+        run: |
+          apk_dir=app
+          apk_files=$(find $apk_dir -name "*.apk")
+          if [ -z "$apk_files" ]; then
+            echo "No APK files found in $apk_dir"
+          else
+            echo "APK files found in $apk_dir:"
+            echo "$apk_files"
+          fi
+
+          apk_file=$(basename $(find "app" -name "*.apk"))
+          apk_name="${apk_file//unsigned/signed}"
+          echo "APP_NAME=$apk_name" >> $GITHUB_ENV
+          
+      - name: Sign the APK
+        env:
+          ALIAS_NAME: ${{ secrets.KEYSTORE_ALIAS_NAME }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          ALIAS_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD_ALIAS }}
+          APP_PATH: "app/build/outputs/apk/extended"
+        run: |
+          path=${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)
+
+          $path/zipalign -v -p 4 ${{ env.APP_PATH }}/release/*.apk ${{ env.APP_PATH }}/release/aligned.apk
+          echo -e -n "\nAlignment Succeeded!\n"
+
+          $path/apksigner sign --ks keystore.jks --ks-key-alias ${{ env.ALIAS_NAME }} --ks-pass pass:${{ env.KEYSTORE_PASSWORD }} --key-pass pass:${{ env.ALIAS_PASSWORD }} --out ${{ env.APP_PATH }}/release/${{ env.APP_NAME }} ${{ env.APP_PATH }}/release/aligned.apk
+          echo -e -n "\nAPK Signing completed successfully!\n"
+
+          $path/apksigner verify ${{ env.APP_PATH }}/release/${{ env.APP_NAME }}
+
+          rm keystore.jks
+
+      - name: Get app version
+        run: |
+          version=$(echo "${{ env.APP_NAME }}" | sed -n 's/.*-v\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p')
+          echo "APP_VERSION=v${version}" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeAlpha-${{ env.APP_VERSION }}
+          path: app/build/outputs/apk/extended/release/${{ env.APP_NAME }}
+          retention-days: 2
+
+      - name: Release APK
+        uses: "dciborow/action-github-releases@v1.0.1"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: ${{ env.APP_VERSION }}
+          prerelease: false
+          title: NativeAlpha-${{ env.APP_VERSION }}
+          files: |
+            app/build/outputs/apk/extended/release/${{ env.APP_NAME }}
